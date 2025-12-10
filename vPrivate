@@ -1,0 +1,2693 @@
+if not game:IsLoaded() then
+  game.Loaded:Wait()
+end
+
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+
+local function loadMainScript()
+  
+  local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+
+pcall(function()
+   local menuGui = playerGui:FindFirstChild("MenuGui")
+   if menuGui and menuGui:WaitForChild("UIToggles").Visible == false then
+       game:GetService("ReplicatedStorage").LoadPlayer:FireServer()
+   end
+end)
+
+local isFarming = false
+local isAutoAttack = false
+local isAutoSpell = false
+local isRenderDisabled = false
+local isLootReset = false
+local selectedMap = "Corrupted Forest"
+local selectedDifficulty = 0
+local selectedHP = 0
+local isStartPressed = false
+local isSpellDelay = false
+local isSellPressed = false
+local savedSelectedTypes = {}
+local savedSelectedRarities = {}
+local mobDistance = 20
+local moveSpeed = 20
+local isAutoCrafting = false
+local isAutoPotionActive = false
+local requiredPlayers = 1
+
+local function ensureSaveFolder()
+   if not isfolder("kinayosaving") then
+       makefolder("kinayosaving")
+   end
+end
+
+local function saveSettings()
+    ensureSaveFolder()
+    local raritiesArray = {}
+    for rarity, _ in pairs(savedSelectedRarities) do
+        table.insert(raritiesArray, rarity)
+    end
+    
+    local settings = {
+        autoAttack = isAutoAttack,
+        autoSpell = isAutoSpell,
+        farming = isFarming,
+        renderDisabled = isRenderDisabled,
+        lootReset = isLootReset,
+        difficulty = selectedDifficulty,
+        spellDelay = isSpellDelay,
+        hp = selectedHP,
+        autoCrafting = isAutoCrafting,
+        startPressed = isStartPressed,
+        map = selectedMap,
+        sellPressed = isSellPressed,
+        selectedTypes = savedSelectedTypes,
+        selectedRarities = raritiesArray,
+        mobDistance = mobDistance,
+        moveSpeed = moveSpeed,
+        autoRealm = isAutoRealm,
+        requiredPlayers = requiredPlayers,
+    }
+    writefile("kinayosaving/settings.json", game:GetService("HttpService"):JSONEncode(settings))
+end
+
+local function loadSettings()
+    ensureSaveFolder()
+    if isfile("kinayosaving/settings.json") then
+        local settings = game:GetService("HttpService"):JSONDecode(readfile("kinayosaving/settings.json"))
+        isAutoAttack = settings.autoAttack or false
+        isAutoSpell = settings.autoSpell or false
+        isFarming = settings.farming or false
+        isRenderDisabled = settings.renderDisabled or false
+        isLootReset = settings.lootReset or false
+        selectedDifficulty = settings.difficulty or 0
+        isSpellDelay = settings.spellDelay or false
+        selectedHP = settings.hp or 0
+        isStartPressed = settings.startPressed or false
+        selectedMap = settings.map or "Corrupted Forest"
+        isSellPressed = settings.sellPressed or false
+        savedSelectedTypes = settings.selectedTypes or {}
+        savedSelectedRarities = {}
+        isAutoCrafting = settings.autoCrafting or false
+        mobDistance = settings.mobDistance or 20
+        moveSpeed = settings.moveSpeed or 20
+        isAutoRealm = settings.autoRealm or false
+        requiredPlayers = settings.requiredPlayers or 1
+        
+        if PlayerCountInput then
+            PlayerCountInput.Text = tostring(requiredPlayers)
+        end
+        
+        for _, rarity in ipairs(settings.selectedRarities or {}) do
+            savedSelectedRarities[rarity] = true
+        end
+        
+        if DistanceLabel then
+            DistanceLabel.Text = "Mob Distance: " .. mobDistance
+        end
+        if SliderButton then
+            local percentage = (mobDistance - 5) / 15
+            SliderButton.Position = UDim2.new(percentage, -6, 0.5, -6)
+        end
+        
+        if SpeedLabel then
+            SpeedLabel.Text = "Move Speed: " .. moveSpeed
+        end
+        if SpeedSliderButton then
+    local percentage = (moveSpeed - 10) / 40
+    SpeedSliderButton.Position = UDim2.new(percentage, -6, 0.5, -6)
+end
+    end
+end
+
+local function shouldAttackFellOak(enemiesFolder)
+   local roomText = game:GetService("Players").LocalPlayer.PlayerGui.BaseGui.Timer.Clock.Inner.Room.Text 
+   if roomText ~= "Room 4/6" then 
+       return false 
+   end
+   
+   local enemiesText = game:GetService("Players").LocalPlayer.PlayerGui.BaseGui.Timer.Clock.Inner.Enemies.Text
+   local enemiesCount = tonumber(string.match(enemiesText, "(%d+)"))
+   
+   if enemiesCount == 1 then
+       return true
+   end
+   
+   for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+       if enemy:IsA("Model") and  
+          enemy.Name ~= "Ancient Fell Oak" and
+          enemy.Name ~= "Defeated" and 
+          enemy.Name ~= "Depleted Crystal" then 
+           return false 
+       end 
+   end
+   
+   return true 
+end
+
+local function autoAttack()
+   while (isFarming or isAutoRealm) and isAutoAttack do
+       if game:GetService("ReplicatedStorage"):FindFirstChild("Start") or game:GetService("Workspace"):FindFirstChild("Teleports") then
+           local player = game.Players.LocalPlayer
+           local character = player.Character
+           if character then
+               local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+               if humanoidRootPart then
+                   local nearestEnemy = nil
+                   local shortestDistance = math.huge
+                   
+                   if isAutoRealm then
+                       for _, part in pairs(workspace.Enemies:GetChildren()) do
+                           if part.Name == "Ashbranch" and part:IsA("Model") and part:FindFirstChild("Humanoid") and part:FindFirstChild("HumanoidRootPart") then
+                               local distance = (humanoidRootPart.Position - part.HumanoidRootPart.Position).Magnitude
+                               if distance < shortestDistance then
+                                   shortestDistance = distance
+                                   nearestEnemy = part
+                               end
+                           else
+                               for _, script in pairs(part:GetChildren()) do
+                                   for _, enemy in pairs(script:GetChildren()) do
+                                       if enemy:IsA("Model") and enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") then
+                                           local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                                           if distance < shortestDistance then
+                                               shortestDistance = distance
+                                               nearestEnemy = enemy
+                                           end
+                                       end
+                                   end
+                               end
+                           end
+                       end
+                   else
+                       local enemiesFolder = game:GetService("Workspace").Enemies
+                       if enemiesFolder then
+                           for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+                               if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
+                                   local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                                   if distance < shortestDistance and enemy.Name ~= "Defeated" and enemy.Name ~= "Depleted Crystal" then
+                                       shortestDistance = distance
+                                       nearestEnemy = enemy
+                                   end
+                               end
+                           end
+                       end
+                   end
+                   
+                   local attackDistance = 30
+                   if nearestEnemy and (nearestEnemy.Name == "Ancient Fell Oak" or nearestEnemy.Name == "Corrupting Crystal" or nearestEnemy.Name == "Ashbranch") then
+                       attackDistance = 50
+                   end
+                   
+                   if nearestEnemy and shortestDistance <= attackDistance then
+                       local args = {
+                           [1] = true
+                       }
+                       game:GetService("ReplicatedStorage").Click:FireServer(unpack(args))
+                   end
+               end
+           end
+       end
+       task.wait(0.1)
+   end
+end
+
+local function castSpells()
+   while (isFarming or isAutoRealm) and isAutoSpell do
+       if game:GetService("ReplicatedStorage"):FindFirstChild("Start") or game:GetService("Workspace"):FindFirstChild("Teleports") then
+           local player = game.Players.LocalPlayer
+           local character = player.Character
+           if character then
+               local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+               if humanoidRootPart then
+                   local nearestEnemy = nil
+                   local shortestDistance = math.huge
+                   
+                   if isAutoRealm then
+                       for _, part in pairs(workspace.Enemies:GetChildren()) do
+                           if part.Name == "Ashbranch" and part:IsA("Model") and part:FindFirstChild("Humanoid") and part:FindFirstChild("HumanoidRootPart") then
+                               local distance = (humanoidRootPart.Position - part.HumanoidRootPart.Position).Magnitude
+                               if distance < shortestDistance then
+                                   shortestDistance = distance
+                                   nearestEnemy = part
+                               end
+                           else
+                               for _, script in pairs(part:GetChildren()) do
+                                   for _, enemy in pairs(script:GetChildren()) do
+                                       if enemy:IsA("Model") and enemy:FindFirstChild("Humanoid") and enemy:FindFirstChild("HumanoidRootPart") then
+                                           local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                                           if distance < shortestDistance then
+                                               shortestDistance = distance
+                                               nearestEnemy = enemy
+                                           end
+                                       end
+                                   end
+                               end
+                           end
+                       end
+                   else
+                       local enemiesFolder = game:GetService("Workspace").Enemies
+                       if enemiesFolder then
+                           for _, enemy in ipairs(enemiesFolder:GetChildren()) do
+                               if enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") then
+                                   local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                                   if distance < shortestDistance and enemy.Name ~= "Defeated" and enemy.Name ~= "Depleted Crystal" then
+                                       shortestDistance = distance
+                                       nearestEnemy = enemy
+                                   end
+                               end
+                           end
+                       end
+                   end
+                   
+                   local spellDistance = 30
+                   if nearestEnemy and (nearestEnemy.Name == "Ancient Fell Oak" or nearestEnemy.Name == "Corrupting Crystal" or nearestEnemy.Name == "Ashbranch") then
+                       spellDistance = 50
+                   end
+                   
+                   if nearestEnemy and shortestDistance <= spellDistance then
+                       for i = 1, 4 do
+                           local args = {
+                               [1] = "Spell" .. i,
+                               [2] = nearestEnemy.HumanoidRootPart.Position,
+                               [3] = Vector3.new(0, 0, 0),
+                               [4] = isSpellDelay and 1.5 or 0
+                           }
+                           game:GetService("ReplicatedStorage").Spell:FireServer(unpack(args))
+                       end
+                   end
+               end
+           end
+       end
+       task.wait(0.1)
+   end
+end
+
+local function autoJump()
+    while isFarming do
+        local player = game.Players.LocalPlayer
+        local character = player.Character
+        if character then
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local currentState = humanoid:GetState()
+                if currentState ~= Enum.HumanoidStateType.Jumping and 
+                   currentState ~= Enum.HumanoidStateType.Freefall then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end
+        end
+        task.wait(5)
+    end
+end
+
+local function getEnemiesCount()
+   local enemiesText = game:GetService("Players").LocalPlayer.PlayerGui.BaseGui.Timer.Clock.Inner.Enemies.Text
+   return tonumber(enemiesText:match("(%d+)"))
+end
+
+local visitedCheckpoints = {}
+local visitedSecondaryCheckpoints = {}
+local visitedTertiaryCheckpoints = {}
+
+local checkpoints = {
+   Vector3.new(98, 29, -1205),
+   Vector3.new(16, 37, -1255)
+}
+
+local secondaryCheckpoints = {
+   Vector3.new(-31, 61, -1130),
+   Vector3.new(-47, 61, -1206),
+   Vector3.new(-49, 61, -1303)
+}
+
+local tertiaryCheckpoints = {
+   Vector3.new(-84, 61, -1303),
+   Vector3.new(-81, 130, -1332)
+}
+
+local function moveToNearestEnemy()  
+   local player = game.Players.LocalPlayer  
+   local character = player.Character or player.CharacterAdded:Wait()  
+   local humanoidRootPart = character:WaitForChild("HumanoidRootPart")   
+   local humanoid = character:WaitForChild("Humanoid")  
+   local pathfindingService = game:GetService("PathfindingService")  
+   local specialCheckpoint = Vector3.new(23, 124, -1450)  
+   local hasVisitedSpecialCheckpoint = false  
+   local noPathTimer = 0
+   local hasMovedToAmbient = false
+   local hasCompletedRoom7Sequence = false
+   local bandidLordPoints = {  
+       Vector3.new(-118, 61, -1338),  
+       Vector3.new(-121, 61, -1376),  
+       Vector3.new(-147, 61, -1338)  
+   }  
+     
+   local function checkEnemyValid(enemy)  
+       return enemy and enemy:IsA("Model") and enemy:FindFirstChild("HumanoidRootPart") and enemy.Parent and enemy.Name ~= "Defeated" and enemy.Name ~= "Depleted Crystal" and enemy.Name ~= "VoidspawnSerpentHitbox"  
+   end
+     
+   local function processCheckpoints(points, visitedPoints, enemiesFolder)  
+       for i, checkpoint in ipairs(points) do  
+           if not visitedPoints[i] then  
+               humanoid:MoveTo(checkpoint)  
+               humanoid.MoveToFinished:Wait()  
+               visitedPoints[i] = true  
+                 
+               if points == tertiaryCheckpoints and i == #points then  
+                   task.wait(0.4)  
+               end  
+                 
+               local nearestEnemy = nil  
+               local shortestDistance = math.huge  
+     
+               for _, enemy in ipairs(enemiesFolder:GetChildren()) do  
+                   if checkEnemyValid(enemy) then  
+                       local path = pathfindingService:CreatePath({  
+                           AgentRadius = 0.1,  
+                           AgentHeight = 1,  
+                           AgentCanJump = true  
+                       })  
+                         
+                       local success = pcall(function()  
+                           path:ComputeAsync(humanoidRootPart.Position, enemy.HumanoidRootPart.Position)  
+                       end)  
+                         
+                       if success and path.Status == Enum.PathStatus.Success then  
+                           if enemy.Name == "Timelost Sorcerer" or enemy.Name == "The Abyssal Spectre" then  
+                               local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude  
+                               return enemy, distance  
+                           end  
+                             
+                           local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude  
+                           if distance < shortestDistance then  
+                               shortestDistance = distance  
+                               nearestEnemy = enemy  
+                           end  
+                       end  
+                   end  
+               end  
+                 
+               if nearestEnemy then  
+                   return nearestEnemy, shortestDistance  
+               end  
+           end  
+       end  
+       return nil, math.huge  
+   end  
+     
+   game.Players.LocalPlayer.CharacterAdded:Connect(function()  
+       table.clear(visitedCheckpoints)  
+       table.clear(visitedSecondaryCheckpoints)  
+       table.clear(visitedTertiaryCheckpoints)  
+       noPathTimer = 0
+       hasMovedToAmbient = false
+       hasCompletedRoom7Sequence = false
+   end)  
+     
+   while isFarming do  
+         
+       humanoid.WalkSpeed = moveSpeed  
+         
+       local enemiesFolder = game:GetService("Workspace").Enemies  
+       if not enemiesFolder then   
+           task.wait(0.1)  
+           continue   
+       end  
+     
+       local roomText = game:GetService("Players").LocalPlayer.PlayerGui.BaseGui.Timer.Clock.Inner.Room.Text  
+       local enemiesCount = getEnemiesCount()  
+         
+       if roomText == "Room 5/6" and enemiesCount <= 11 and not hasVisitedSpecialCheckpoint then  
+           humanoid:MoveTo(specialCheckpoint)  
+           humanoid.MoveToFinished:Wait()  
+           hasVisitedSpecialCheckpoint = true  
+       end  
+     
+       local isRoom5 = roomText == "Room 5/6"  
+       local isRoom3 = roomText == "Room 3/8"
+       local isRoom7 = roomText == "Room 7/8"
+       local isRoom2 = roomText == "Room 2/8"
+       local canAttackFellOak = shouldAttackFellOak(enemiesFolder)  
+       
+       if isRoom7 and tonumber(enemiesCount) == 30 and not hasCompletedRoom7Sequence then
+           local room7Path = pathfindingService:CreatePath({
+               AgentRadius = 0.1,
+               AgentHeight = 1,
+               AgentCanJump = true
+           })
+           
+           local success = pcall(function()
+               room7Path:ComputeAsync(humanoidRootPart.Position, Vector3.new(329, 389, -917))
+           end)
+           
+           if success and room7Path.Status == Enum.PathStatus.Success then
+               for _, waypoint in ipairs(room7Path:GetWaypoints()) do
+                   if not isFarming then break end
+                   humanoid:MoveTo(waypoint.Position)
+                   humanoid.MoveToFinished:Wait()
+               end
+               hasCompletedRoom7Sequence = true
+           end
+           
+           task.wait(0.1)
+           continue
+       end
+       
+       if isRoom3 and enemiesCount == 9 and not workspace:FindFirstChild("Ambient") and not hasMovedToAmbient then
+           local ambientPath = pathfindingService:CreatePath({
+               AgentRadius = 0.1,
+               AgentHeight = 1,
+               AgentCanJump = true
+           })
+           
+           local success = pcall(function()
+               ambientPath:ComputeAsync(humanoidRootPart.Position, Vector3.new(26, 489, -155))
+           end)
+           
+           if success and ambientPath.Status == Enum.PathStatus.Success then
+               for _, waypoint in ipairs(ambientPath:GetWaypoints()) do
+                   if not isFarming then break end
+                   humanoid:MoveTo(waypoint.Position)
+                   humanoid.MoveToFinished:Wait()
+               end
+               
+               humanoid:MoveTo(Vector3.new(39, 469, -191))
+               humanoid.MoveToFinished:Wait()
+               hasMovedToAmbient = true
+           end
+           
+           task.wait(0.1)
+           continue
+       end
+         
+       local function findNearestEnemy()  
+    local nearestEnemy = nil  
+    local shortestDistance = math.huge  
+    local xyktosEnemy = nil
+    local xyktosDistance = math.huge
+     
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do  
+        if checkEnemyValid(enemy) then  
+            if enemy.Name == "Timelost Sorcerer" or enemy.Name == "The Abyssal Spectre" then  
+                local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude  
+                return enemy, distance  
+            end  
+        end 
+    end 
+     
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do  
+        if checkEnemyValid(enemy) and enemy.Name == "Corrupting Crystal" then  
+            local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude  
+            return enemy, distance  
+        end 
+    end 
+ 
+    for _, enemy in ipairs(enemiesFolder:GetChildren()) do  
+        if checkEnemyValid(enemy) then  
+            if enemy.Name ~= "Ancient Fell Oak" or canAttackFellOak then
+                local distance = (humanoidRootPart.Position - enemy.HumanoidRootPart.Position).Magnitude
+                
+                if enemy.Name == "Xyktos" then
+                    if distance < xyktosDistance then
+                        xyktosDistance = distance
+                        xyktosEnemy = enemy
+                    end
+                else
+                    if distance < shortestDistance then  
+                        shortestDistance = distance  
+                        nearestEnemy = enemy  
+                    end
+                end
+            end  
+        end  
+    end
+    
+    if nearestEnemy then
+        return nearestEnemy, shortestDistance
+    end
+    
+    if xyktosEnemy then
+        return xyktosEnemy, xyktosDistance
+    end
+      
+    return nil, math.huge  
+end
+         
+       local nearestEnemy, shortestDistance = findNearestEnemy()  
+       
+       if isRoom2 and enemiesCount == 7 and not nearestEnemy then
+           humanoid:MoveTo(Vector3.new(9, 489, -103))
+           humanoid.MoveToFinished:Wait()
+           task.wait(0.1)
+           continue
+       end
+       
+       if nearestEnemy and checkEnemyValid(nearestEnemy) then  
+           local path = pathfindingService:CreatePath({  
+               AgentRadius = 0.1,  
+               AgentHeight = 1,  
+               AgentCanJump = true  
+           })  
+             
+           local success = pcall(function()  
+               path:ComputeAsync(humanoidRootPart.Position, nearestEnemy.HumanoidRootPart.Position)  
+           end)  
+     
+           if not success or path.Status ~= Enum.PathStatus.Success then
+               
+if roomText == "Room 5/10" and enemiesCount == 14 then
+    humanoid:MoveTo(Vector3.new(566, 93, 580))
+    humanoid.MoveToFinished:Wait()
+    task.wait(0.1)
+    continue
+end
+               
+               if isRoom7 then
+                   if enemiesCount == 19 then
+                       local room7SpecialPath = pathfindingService:CreatePath({
+                           AgentRadius = 0.1,
+                           AgentHeight = 1,
+                           AgentCanJump = true
+                       })
+                       
+                       local room7SpecialSuccess = pcall(function()
+                           room7SpecialPath:ComputeAsync(humanoidRootPart.Position, Vector3.new(336, 413, -980))
+                       end)
+                       
+                       if room7SpecialSuccess and room7SpecialPath.Status == Enum.PathStatus.Success then
+                           for _, waypoint in ipairs(room7SpecialPath:GetWaypoints()) do
+                               if not isFarming then break end
+                               humanoid:MoveTo(waypoint.Position)
+                               humanoid.MoveToFinished:Wait()
+                           end
+                           task.wait(0.1)
+                           continue
+                       end
+                   else
+                       local room7Path = pathfindingService:CreatePath({
+                           AgentRadius = 0.1,
+                           AgentHeight = 1,
+                           AgentCanJump = true
+                       })
+                       
+                       local room7Success = pcall(function()
+                           room7Path:ComputeAsync(humanoidRootPart.Position, Vector3.new(310, 389, -1079))
+                       end)
+                       
+                       if room7Success and room7Path.Status == Enum.PathStatus.Success then
+                           for _, waypoint in ipairs(room7Path:GetWaypoints()) do
+                               if not isFarming then break end
+                               humanoid:MoveTo(waypoint.Position)
+                               humanoid.MoveToFinished:Wait()
+                           end
+                           
+                           humanoid:MoveTo(Vector3.new(285, 413, -1010))
+                           humanoid.MoveToFinished:Wait()
+                           task.wait(0.1)
+                           continue
+                       end
+                   end
+               elseif isRoom5 then  
+                   if enemiesCount and enemiesCount <= 14 then  
+                       nearestEnemy, shortestDistance = processCheckpoints(tertiaryCheckpoints, visitedTertiaryCheckpoints, enemiesFolder)  
+                   else  
+                       nearestEnemy, shortestDistance = processCheckpoints(checkpoints, visitedCheckpoints, enemiesFolder)  
+                       if not nearestEnemy then  
+                           nearestEnemy, shortestDistance = processCheckpoints(secondaryCheckpoints, visitedSecondaryCheckpoints, enemiesFolder)  
+                       end  
+                   end  
+               end  
+               if not nearestEnemy then  
+                   task.wait(0.1)  
+                   continue  
+               end  
+           end 
+     
+           if nearestEnemy and checkEnemyValid(nearestEnemy) then  
+               local enemyPosition = nearestEnemy.HumanoidRootPart.Position  
+               local direction = (enemyPosition - humanoidRootPart.Position).Unit  
+     
+               if nearestEnemy.Name == "Corrupting Crystal" then  
+                   local targetPosition = nearestEnemy.HumanoidRootPart.Position  
+                   humanoid:MoveTo(targetPosition)  
+               elseif nearestEnemy.Name == "Bandit Lord" then  
+                   if shortestDistance > mobDistance then  
+                       local currentPoint = 1  
+                       while checkEnemyValid(nearestEnemy) and isFarming do  
+                           humanoid:MoveTo(bandidLordPoints[currentPoint])  
+                           humanoid.MoveToFinished:Wait()  
+                           currentPoint = currentPoint + 1  
+                           if currentPoint > #bandidLordPoints then  
+                               currentPoint = 1  
+                           end  
+                           task.wait(0.1)  
+                       end  
+                   end  
+               elseif nearestEnemy.Name == "Ancient Fell Oak" then  
+                   local targetPosition = nearestEnemy.HumanoidRootPart.Position + Vector3.new(25, 0, 0)  
+                   humanoid:MoveTo(targetPosition)  
+               elseif nearestEnemy.Name == "Timelost Sorcerer" or nearestEnemy.Name == "The Abyssal Spectre" then  
+                   local initialPoint = Vector3.new(346, 132, -1254)  
+                   local circlePoints = {  
+                       Vector3.new(346, 132, -1254),  
+                       Vector3.new(375, 132, -1266),  
+                       Vector3.new(342, 132, -1241)  
+                   }  
+                     
+                   local mobPath = pathfindingService:CreatePath({  
+                       AgentRadius = 0.1,  
+                       AgentHeight = 1,  
+                       AgentCanJump = true  
+                   })  
+                     
+                   local mobSuccess = pcall(function()  
+                       mobPath:ComputeAsync(humanoidRootPart.Position, initialPoint)  
+                   end)  
+                     
+                   if mobSuccess and mobPath.Status == Enum.PathStatus.Success then  
+                       for _, waypoint in ipairs(mobPath:GetWaypoints()) do  
+                           if not isFarming then break end  
+                           humanoid:MoveTo(waypoint.Position)  
+                           humanoid.MoveToFinished:Wait()  
+                       end  
+                         
+                       local currentPoint = 1  
+                       while checkEnemyValid(nearestEnemy) and isFarming do  
+                           humanoid:MoveTo(circlePoints[currentPoint])  
+                           humanoid.MoveToFinished:Wait()  
+                           currentPoint = currentPoint + 1  
+                           if currentPoint > #circlePoints then  
+                               currentPoint = 1  
+                           end  
+                           task.wait(0.1)  
+                       end  
+                   end  
+               else  
+                   if shortestDistance < mobDistance then  
+                       local rightVector = humanoidRootPart.CFrame.RightVector  
+                       local targetPosition = enemyPosition - direction * mobDistance + rightVector * -5  
+                       humanoid:MoveTo(targetPosition)  
+                   else  
+                       local mobPath = pathfindingService:CreatePath({  
+                           AgentRadius = 0.1,  
+                           AgentHeight = 1,  
+                           AgentCanJump = true  
+                       })  
+                         
+                       local mobSuccess = pcall(function()  
+                           mobPath:ComputeAsync(humanoidRootPart.Position, nearestEnemy.HumanoidRootPart.Position)  
+                       end)  
+                         
+                       if mobSuccess and mobPath.Status == Enum.PathStatus.Success then  
+                           for _, waypoint in ipairs(mobPath:GetWaypoints()) do  
+                               if not isFarming then break end  
+                               if checkEnemyValid(nearestEnemy) then  
+                                   local currentDistance = (humanoidRootPart.Position - nearestEnemy.HumanoidRootPart.Position).Magnitude  
+                                   if currentDistance < mobDistance then  
+                                       local rightVector = humanoidRootPart.CFrame.RightVector  
+                                       local targetPosition = enemyPosition - direction * mobDistance + rightVector * -5  
+                                       humanoid:MoveTo(targetPosition)  
+                                       break  
+                                   end  
+                                   humanoid:MoveTo(waypoint.Position)  
+                                   humanoid.MoveToFinished:Wait()  
+                               else  
+                                   break  
+                               end  
+                           end  
+                       end  
+                   end  
+               end  
+           end  
+       else  
+           if isRoom7 then
+               if enemiesCount == 19 then
+                   local room7SpecialPath = pathfindingService:CreatePath({
+                       AgentRadius = 0.1,
+                       AgentHeight = 1,
+                       AgentCanJump = true
+                   })
+                   
+                   local room7SpecialSuccess = pcall(function()
+                       room7SpecialPath:ComputeAsync(humanoidRootPart.Position, Vector3.new(336, 413, -980))
+                   end)
+                   
+                   if room7SpecialSuccess and room7SpecialPath.Status == Enum.PathStatus.Success then
+                       for _, waypoint in ipairs(room7SpecialPath:GetWaypoints()) do
+                           if not isFarming then break end
+                           humanoid:MoveTo(waypoint.Position)
+                           humanoid.MoveToFinished:Wait()
+                       end
+                   end
+                   task.wait(0.1)
+                   continue
+               else
+                   local room7FallbackPath = pathfindingService:CreatePath({
+                       AgentRadius = 0.1,
+                       AgentHeight = 1,
+                       AgentCanJump = true
+                   })
+                   
+                   local room7FallbackSuccess = pcall(function()
+                       room7FallbackPath:ComputeAsync(humanoidRootPart.Position, Vector3.new(310, 389, -1079))
+                   end)
+                   
+                   if room7FallbackSuccess and room7FallbackPath.Status == Enum.PathStatus.Success then
+                       for _, waypoint in ipairs(room7FallbackPath:GetWaypoints()) do
+                           if not isFarming then break end
+                           humanoid:MoveTo(waypoint.Position)
+                           humanoid.MoveToFinished:Wait()
+                       end
+                       
+                       humanoid:MoveTo(Vector3.new(285, 413, -1010))
+                       humanoid.MoveToFinished:Wait()
+                   end
+                   task.wait(0.1)
+                   continue
+               end
+           elseif isRoom5 then  
+               if enemiesCount and enemiesCount <= 14 then  
+                   nearestEnemy, shortestDistance = processCheckpoints(tertiaryCheckpoints, visitedTertiaryCheckpoints, enemiesFolder)  
+               else  
+                   nearestEnemy, shortestDistance = processCheckpoints(checkpoints, visitedCheckpoints, enemiesFolder)  
+                   if not nearestEnemy then  
+                       nearestEnemy, shortestDistance = processCheckpoints(secondaryCheckpoints, visitedSecondaryCheckpoints, enemiesFolder)  
+                   end  
+               end  
+           end  
+           task.wait(0.1)  
+           continue  
+       end  
+         
+       task.wait(0)  
+         
+       if not checkEnemyValid(nearestEnemy) then  
+           task.wait(0.1)  
+           continue  
+       end  
+   end 
+end
+
+local function activateGodMode()
+    spawn(function()
+        while true do
+            wait(0.1)
+            pcall(function()
+                local EnemyAttacks = workspace.EnemyAttacks
+                for _, child in pairs(EnemyAttacks:GetChildren()) do
+                    if child:IsA("Model") then
+                        for _, descendant in pairs(child:GetDescendants()) do
+                            descendant:Destroy()
+                        end
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+activateGodMode()
+
+local function getEquippedAndPinnedItems()
+  local equipped = {}
+  local playerInventory = workspace.Inventories[game.Players.LocalPlayer.Name]
+  
+  local slots = {"Weapon", "Leggings", "Armor", "Helmet", "Emblem", "Spell1", "Spell2"}
+  
+  for _, slot in ipairs(slots) do
+      local equippedItem = playerInventory:FindFirstChild(slot)
+      if equippedItem and equippedItem:IsA("StringValue") then
+          equipped[equippedItem.Value] = true
+      end
+  end
+  
+  for _, item in pairs(playerInventory.Items:GetChildren()) do
+      if item:IsA("StringValue") then
+          local values = item.Value:split(",")
+          if values[#values] == "1" then
+              equipped[item.Name] = true
+          end
+      end
+  end
+  
+  return equipped
+end
+
+local function updateRenderState()
+    local playerGui = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+    local kinayoScripts = playerGui:WaitForChild("KinayoScripts")
+    local blackOverlay = kinayoScripts:FindFirstChild("BlackOverlay")
+    
+    if (isFarming or isAutoRealm) and isRenderDisabled then
+        game:GetService("RunService"):Set3dRenderingEnabled(false)
+        if blackOverlay then
+            blackOverlay.Visible = true
+        end
+    else
+        game:GetService("RunService"):Set3dRenderingEnabled(true)
+        if blackOverlay then
+            blackOverlay.Visible = false
+        end
+    end
+end
+
+local function startFarming()
+    if isFarming then
+        if game:GetService("ReplicatedStorage"):FindFirstChild("Start") then
+            local playerCount = #game:GetService("Players"):GetPlayers()
+            
+            if playerCount >= requiredPlayers then
+                game:GetService("ReplicatedStorage").Start:FireServer()
+                task.spawn(function()
+                    task.wait(3)
+                    local screenGui = game.Players.LocalPlayer.PlayerGui:FindFirstChild("KinayoScripts")
+                    if screenGui then
+                        local mainFrame = screenGui:FindFirstChild("MainFrame")
+                        if mainFrame then
+                            mainFrame.Visible = false
+                        end
+                    end
+                end)
+                
+                task.spawn(moveToNearestEnemy)
+                if isAutoAttack then
+                    task.spawn(autoAttack)
+                end
+                if isAutoSpell then
+                    task.spawn(castSpells)
+                end
+                task.spawn(autoJump)
+            else
+                task.spawn(function()
+                    while isFarming and game:GetService("ReplicatedStorage"):FindFirstChild("Start") do
+                        playerCount = #game:GetService("Players"):GetPlayers()
+                        if playerCount >= requiredPlayers then
+                            game:GetService("ReplicatedStorage").Start:FireServer()
+                            task.wait(3)
+                            local screenGui = game.Players.LocalPlayer.PlayerGui:FindFirstChild("KinayoScripts")
+                            if screenGui then
+                                local mainFrame = screenGui:FindFirstChild("MainFrame")
+                                if mainFrame then
+                                    mainFrame.Visible = false
+                                end
+                            end
+                            
+                            task.spawn(moveToNearestEnemy)
+                            if isAutoAttack then
+                                task.spawn(autoAttack)
+                            end
+                            if isAutoSpell then
+                                task.spawn(castSpells)
+                            end
+                            task.spawn(autoJump)
+                            break
+                        end
+                        task.wait(1)
+                    end
+                end)
+            end
+        end
+        updateRenderState()
+    end
+end
+
+local Player = game.Players.LocalPlayer
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "KinayoScripts"
+ScreenGui.Parent = Player.PlayerGui
+ScreenGui.ResetOnSpawn = false
+ScreenGui.DisplayOrder = 999999999
+ScreenGui.IgnoreGuiInset = true
+
+local BlackOverlay = Instance.new("Frame")
+BlackOverlay.Name = "BlackOverlay"
+BlackOverlay.Size = UDim2.new(1, 0, 1, 0)
+BlackOverlay.Position = UDim2.new(0, 0, 0, 0)
+BlackOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+BlackOverlay.BackgroundTransparency = 0
+BlackOverlay.Visible = false
+BlackOverlay.Parent = ScreenGui
+
+local ToggleButton = Instance.new("ImageButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(0, 30, 0, 30)
+ToggleButton.Position = UDim2.new(0.5, -15, 0, 5)
+ToggleButton.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+ToggleButton.BackgroundTransparency = 0.6
+ToggleButton.Parent = ScreenGui
+ToggleButton.Image = "rbxassetid://15897842087"
+ToggleButton.ImageTransparency = 0.6
+
+local ToggleLabel = Instance.new("TextLabel")
+ToggleLabel.Name = "ToggleLabel"
+ToggleLabel.Size = UDim2.new(1, 0, 1, 0)
+ToggleLabel.BackgroundTransparency = 1
+ToggleLabel.Text = "K"
+ToggleLabel.Font = Enum.Font.SourceSansBold
+ToggleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleLabel.TextSize = 18
+ToggleLabel.Parent = ToggleButton
+
+local UICorner_Toggle = Instance.new("UICorner")
+UICorner_Toggle.CornerRadius = UDim.new(0.3, 0)
+UICorner_Toggle.Parent = ToggleButton
+
+local MainFrame = Instance.new("ImageLabel")
+MainFrame.Name = "MainFrame"
+MainFrame.Size = UDim2.new(0, 240, 0, 260)
+MainFrame.Position = UDim2.new(0.5, -120, 0.5, -110)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.BackgroundTransparency = 0.4
+MainFrame.ImageTransparency = 0.7
+MainFrame.BorderSizePixel = 0
+MainFrame.Image = "rbxassetid://9240529838"
+MainFrame.ScaleType = Enum.ScaleType.Stretch
+MainFrame.Parent = ScreenGui
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(147, 112, 219)
+MainStroke.Thickness = 2
+MainStroke.Parent = MainFrame
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 12)
+UICorner.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Name = "Title"
+Title.Size = UDim2.new(1, 0, 0, 20)
+Title.Position = UDim2.new(0, 0, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "Kinayo Scripts"
+Title.Font = Enum.Font.SourceSansBold
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 18
+Title.Parent = MainFrame
+
+local SubTitle = Instance.new("TextLabel")
+SubTitle.Name = "SubTitle"
+SubTitle.Size = UDim2.new(1, 0, 0, 15)
+SubTitle.Position = UDim2.new(0, 0, 0.1, 0)
+SubTitle.BackgroundTransparency = 1
+SubTitle.Text = "Arcane Conquest"
+SubTitle.Font = Enum.Font.SourceSansItalic
+SubTitle.TextColor3 = Color3.fromRGB(200, 200, 200)
+SubTitle.TextSize = 14
+SubTitle.Parent = MainFrame
+
+local DiscordButton = Instance.new("TextButton")
+DiscordButton.Name = "DiscordButton"
+DiscordButton.Size = UDim2.new(0, 40, 0, 20)
+DiscordButton.Position = UDim2.new(1, -45, 0, 5)
+DiscordButton.BackgroundColor3 = Color3.fromRGB(88, 101, 242)
+DiscordButton.BackgroundTransparency = 0.2
+DiscordButton.Text = "Discord"
+DiscordButton.Font = Enum.Font.Gotham
+DiscordButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+DiscordButton.TextSize = 12
+DiscordButton.Parent = MainFrame
+
+local UICorner_Discord = Instance.new("UICorner")
+UICorner_Discord.CornerRadius = UDim.new(0, 6)
+UICorner_Discord.Parent = DiscordButton
+
+local function createButton(name, pos)
+    local button = Instance.new("TextButton")
+    button.Name = name
+    button.Size = UDim2.new(0.45, 0, 0, 25)
+    button.Position = pos
+    button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    button.BackgroundTransparency = 0.6
+    button.Text = name
+    button.Font = Enum.Font.Gotham
+    button.TextColor3 = Color3.fromRGB(255, 255, 255)
+    button.TextSize = 12
+    button.Parent = MainFrame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = button
+
+    return button
+end
+
+local FarmButton = createButton("Auto Farm", UDim2.new(0.03, 0, 0.15, 0))
+local AutoAttackButton = createButton("Auto Attack", UDim2.new(0.52, 0, 0.15, 0))
+local AutoPotionButton = createButton("Auto Potion", UDim2.new(0.52, 0, 0.35, 0))
+local AutoSpellButton = createButton("Auto Spell", UDim2.new(0.52, 0, 0.25, 0))
+local RenderButton = createButton("Disable Render", UDim2.new(0.03, 0, 0.35, 0))
+local AutoJoinButton = createButton("Auto Join", UDim2.new(0.03, 0, 0.45, 0))
+local AutoSellButton = createButton("Auto Sell", UDim2.new(0.52, 0, 0.45, 0))
+local SpellDelayButton = createButton("Hold Skills", UDim2.new(0.03, 0, 0.55, 0))
+local WebhookButton = createButton("Webhook", UDim2.new(0.52, 0, 0.55, 0))
+local AutoRealmButton = createButton("Auto Realm", UDim2.new(0.03, 0, 0.25, 0))
+local LootResetButton = createButton("Loot Reset", UDim2.new(0.03, 0, 0.89, 0))
+local AutoCraftButton = createButton("Auto Craft", UDim2.new(0.52, 0, 0.89, 0))
+
+loadSettings()
+
+local function autoUsePotions()
+    local potionNames = {
+        "005_Woodland Potion of Fortune",
+        "005_Woodland Potion of Wisdom",
+        "Woodland Potion of Shielding",
+        "Woodland Potion of Haste",
+        "Woodland Potion of Opulence",
+        "Woodland Potion of Wrath"
+    }
+    
+    local function usePotion(itemId)
+        local args = {
+            [1] = itemId,
+            [2] = 1
+        }
+        game:GetService("ReplicatedStorage").EquipItem:FireServer(unpack(args))
+    end
+    
+    while isAutoPotionActive do
+        local playerInventory = workspace:WaitForChild("Inventories"):WaitForChild(game.Players.LocalPlayer.Name):WaitForChild("Items")
+        local foundPotions = {}
+        
+        for _, item in pairs(playerInventory:GetChildren()) do
+            if item:IsA("StringValue") then
+                local fullValue = item.Value
+                
+                for _, potionName in ipairs(potionNames) do
+                    local withPrefix = potionName
+                    local withoutPrefix = potionName:gsub("005_", "")
+                    
+                    if (fullValue:match(withPrefix) or fullValue:match(withoutPrefix)) then
+                        table.insert(foundPotions, item.Name)
+                        break
+                    end
+                end
+            end
+        end
+        
+        for _, potionId in ipairs(foundPotions) do
+            usePotion(potionId)
+            task.wait(0.2)
+        end
+        
+        task.wait(1)
+    end
+end
+
+AutoPotionButton.MouseButton1Click:Connect(function()
+    isAutoPotionActive = not isAutoPotionActive
+    AutoPotionButton.BackgroundColor3 = isAutoPotionActive and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    
+    if isAutoPotionActive then
+        task.spawn(autoUsePotions)
+    end
+    saveSettings()
+end)
+
+local function autoRealm()
+    local args = {
+        [1] = "Layer3"
+    }
+    game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(args))
+    
+    task.wait(1)
+    
+    task.spawn(function()
+        task.wait(3)
+        local screenGui = game.Players.LocalPlayer.PlayerGui:FindFirstChild("KinayoScripts")
+        if screenGui then
+            local mainFrame = screenGui:FindFirstChild("MainFrame")
+            if mainFrame then
+                mainFrame.Visible = false
+            end
+        end
+    end)
+    
+    if isAutoAttack then
+        task.spawn(autoAttack)
+    end
+    
+    if isAutoSpell then
+        task.spawn(castSpells)
+    end
+    
+    local PathfindingService = game:GetService("PathfindingService")
+    local player = game:GetService("Players").LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    local hrp = character:WaitForChild("HumanoidRootPart")
+    local lastTargetingActivity = tick()
+    local isSearchingForMob = false
+    local isFightingBoss = false
+    local bossTarget = nil
+    
+    local baseGui = player.PlayerGui:WaitForChild("BaseGui")
+    local championFrame = baseGui:WaitForChild("Champion")
+    
+    local championVisibleConnection
+    championVisibleConnection = championFrame:GetPropertyChangedSignal("Visible"):Connect(function()
+        if championFrame.Visible and not isFightingBoss then
+            isFightingBoss = true
+            
+            local bossArgs = {
+                [1] = "Boss"
+            }
+            game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(bossArgs))
+            task.wait(2)
+            
+            humanoid:MoveTo(Vector3.new(350, 235, 1019))
+            championFrame.Visible = false
+            
+            task.spawn(function()
+                while isFightingBoss and isAutoRealm do
+                    local ashbranch = workspace.Enemies:FindFirstChild("Ashbranch")
+                    
+                    if ashbranch and ashbranch:FindFirstChild("HumanoidRootPart") then
+                        bossTarget = ashbranch
+                        humanoid:MoveTo(ashbranch.HumanoidRootPart.Position)
+                        task.wait(0.5)
+                        
+                        if not ashbranch.Parent or ashbranch.Name == "Defeated" then
+                            isFightingBoss = false
+                            bossTarget = nil
+                            
+                            local returnArgs = {
+                                [1] = "Layer3"
+                            }
+                            game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(returnArgs))
+                            task.wait(2)
+                            break
+                        end
+                        
+                        local health = ashbranch:FindFirstChild("HealthValue")
+                        if health and health.Value <= 0 then
+                            isFightingBoss = false
+                            bossTarget = nil
+                            
+                            local returnArgs = {
+                                [1] = "Layer3"
+                            }
+                            game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(returnArgs))
+                            task.wait(2)
+                            break
+                        end
+                    else
+                        task.wait(1)
+                    end
+                end
+            end)
+        end
+    end)
+    
+    local charConnection
+    charConnection = player.CharacterAdded:Connect(function(newChar)
+        if not isAutoRealm then
+            charConnection:Disconnect()
+            return
+        end
+        
+        task.wait(1)
+        character = newChar
+        humanoid = character:WaitForChild("Humanoid")
+        hrp = character:WaitForChild("HumanoidRootPart")
+        
+        if isAutoRealm then
+            if isFightingBoss and bossTarget then
+                local bossArgs = {
+                    [1] = "Boss"
+                }
+                game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(bossArgs))
+            else
+                local teleportArgs = {
+                    [1] = "Layer3"
+                }
+                game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(teleportArgs))
+            end
+            task.wait(1)
+        end
+    end)
+    
+    local function findAllMobs()
+        local mobs = {}
+        for _, part in pairs(workspace.Enemies:GetChildren()) do
+            for _, script in pairs(part:GetChildren()) do
+                for _, model in pairs(script:GetChildren()) do
+                    if model:IsA("Model") and model:FindFirstChild("Humanoid") and model:FindFirstChild("HumanoidRootPart") then
+                        table.insert(mobs, model)
+                    end
+                end
+            end
+        end
+        return mobs
+    end
+    
+    local function isMobDefeated(mob)
+        if not mob or not mob.Parent then
+            return true
+        end
+        
+        if mob.Name == "Defeated" then
+            return true
+        end
+        
+        local health = mob:FindFirstChild("HealthValue")
+        if health and health.Value <= 0 then
+            return true
+        end
+        
+        return false
+    end
+    
+    local function tryPathTo(targetPosition)
+        local path = PathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            WaypointSpacing = 4
+        })
+        
+        local success, err = pcall(function()
+            path:ComputeAsync(hrp.Position, targetPosition)
+        end)
+        
+        if success and path.Status == Enum.PathStatus.Success then
+            return true, path
+        else
+            return false, nil
+        end
+    end
+    
+    local function findNextTarget()
+        isSearchingForMob = true
+        local allMobs = findAllMobs()
+        local mobsByDistance = {}
+        
+        for _, enemy in pairs(allMobs) do
+            if not isMobDefeated(enemy) then
+                local enemyHRP = enemy:FindFirstChild("HumanoidRootPart")
+                if enemyHRP then
+                    local distance = (hrp.Position - enemyHRP.Position).Magnitude
+                    table.insert(mobsByDistance, {mob = enemy, distance = distance})
+                end
+            end
+        end
+        
+        table.sort(mobsByDistance, function(a, b) return a.distance < b.distance end)
+        
+        for _, mobData in ipairs(mobsByDistance) do
+            local enemy = mobData.mob
+            if enemy and enemy:FindFirstChild("HumanoidRootPart") and not isMobDefeated(enemy) then
+                local canPath, path = tryPathTo(enemy.HumanoidRootPart.Position)
+                if canPath then
+                    lastTargetingActivity = tick()
+                    isSearchingForMob = false
+                    return enemy, path
+                end
+            end
+        end
+        
+        isSearchingForMob = false
+        return nil, nil
+    end
+    
+    while isAutoRealm do
+        if not isFightingBoss then
+            if isSearchingForMob == false and tick() - lastTargetingActivity > 5 then
+                local teleportArgs = {
+                    [1] = "Layer3"
+                }
+                game:GetService("ReplicatedStorage").Teleport:FireServer(unpack(teleportArgs))
+                lastTargetingActivity = tick()
+                task.wait(2)
+            end
+            
+            local targetEnemy, targetPath = findNextTarget()
+            
+            if targetEnemy and targetPath then
+                local waypoints = targetPath:GetWaypoints()
+                
+                for i, waypoint in ipairs(waypoints) do
+                    lastTargetingActivity = tick()
+                    
+                    if isMobDefeated(targetEnemy) or not isAutoRealm or isFightingBoss then
+                        break
+                    end
+                    
+                    if waypoint.Action == Enum.PathWaypointAction.Jump then
+                        humanoid.Jump = true
+                    end
+                    
+                    humanoid:MoveTo(waypoint.Position)
+                    
+                    local timeout = tick() + 2
+                    local reachedWaypoint = false
+                    
+                    repeat
+                        lastTargetingActivity = tick()
+                        
+                        if isMobDefeated(targetEnemy) or isFightingBoss then
+                            break
+                        end
+                        
+                        local distance = (hrp.Position - waypoint.Position).Magnitude
+                        if distance < 5 then
+                            reachedWaypoint = true
+                        end
+                        task.wait(0.1)
+                    until reachedWaypoint or tick() > timeout or isMobDefeated(targetEnemy) or not isAutoRealm or isFightingBoss
+                    
+                    if tick() > timeout or isMobDefeated(targetEnemy) or isFightingBoss then
+                        break
+                    end
+                end
+            else
+                task.wait(1)
+            end
+        else
+            task.wait(1)
+        end
+        
+        task.wait(0.1)
+    end
+    
+    if championVisibleConnection then
+        championVisibleConnection:Disconnect()
+    end
+    
+    if charConnection then
+        charConnection:Disconnect()
+    end
+end
+
+if isAutoRealm then
+    task.spawn(autoRealm)
+    AutoRealmButton.BackgroundColor3 = isAutoRealm and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+end
+
+AutoRealmButton.MouseButton1Click:Connect(function()
+    isAutoRealm = not isAutoRealm
+    AutoRealmButton.BackgroundColor3 = isAutoRealm and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    
+    if isAutoRealm then
+        task.spawn(autoRealm)
+        updateRenderState()
+    else
+        updateRenderState()
+    end
+    saveSettings()
+end)
+
+local function autoCraft() 
+    while isAutoCrafting do 
+        local playerInventory = workspace:WaitForChild("Inventories"):WaitForChild(game.Players.LocalPlayer.Name):WaitForChild("Items") 
+        local raventhornItems = {["1"] = {}, ["2"] = {}, ["3"] = {}, ["4"] = {}, ["5"] = {}, ["6"] = {}} 
+        local arbiterItems = {["1"] = {}, ["2"] = {}, ["3"] = {}, ["4"] = {}, ["5"] = {}, ["6"] = {}} 
+         
+        for _, item in pairs(playerInventory:GetChildren()) do 
+            if item:IsA("StringValue") then 
+                local fullValue = item.Value 
+                local ravenLevel = fullValue:match("020_Raventhorn Amulet,(%d)") 
+                local arbiterLevel = fullValue:match("060_Arbiter's Gaze,(%d)")
+                 
+                if ravenLevel and (ravenLevel == "1" or ravenLevel == "2" or ravenLevel == "3" or ravenLevel == "4" or ravenLevel == "5" or ravenLevel == "6") then 
+                    table.insert(raventhornItems[ravenLevel], item.Name) 
+                end
+                
+                if arbiterLevel and (arbiterLevel == "1" or arbiterLevel == "2" or arbiterLevel == "3" or arbiterLevel == "4" or arbiterLevel == "5" or arbiterLevel == "6") then 
+                    table.insert(arbiterItems[arbiterLevel], item.Name) 
+                end
+            end 
+        end 
+         
+        for level = 1, 6 do 
+            local levelStr = tostring(level)
+            if #raventhornItems[levelStr] >= 3 then 
+                local args = {raventhornItems[levelStr][1], raventhornItems[levelStr][2], raventhornItems[levelStr][3]} 
+                game:GetService("ReplicatedStorage"):WaitForChild("CraftItem"):FireServer(unpack(args)) 
+            end
+            
+            if #arbiterItems[levelStr] >= 3 then 
+                local args = {arbiterItems[levelStr][1], arbiterItems[levelStr][2], arbiterItems[levelStr][3]} 
+                game:GetService("ReplicatedStorage"):WaitForChild("CraftItem"):FireServer(unpack(args)) 
+            end
+        end 
+         
+        task.wait(0.1) 
+    end 
+end
+
+if isAutoCrafting then
+    task.spawn(autoCraft)
+    AutoCraftButton.BackgroundColor3 = isAutoCrafting and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+end
+
+AutoCraftButton.MouseButton1Click:Connect(function()
+    isAutoCrafting = not isAutoCrafting
+    AutoCraftButton.BackgroundColor3 = isAutoCrafting and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    
+    if isAutoCrafting then
+        task.spawn(autoCraft)
+    end
+    saveSettings()
+end)
+
+local JoinFrame = Instance.new("Frame")
+JoinFrame.Name = "JoinFrame"
+JoinFrame.Size = UDim2.new(0, 180, 0, 180)
+JoinFrame.Position = UDim2.new(1.05, 0, 0, 0)
+JoinFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+JoinFrame.BackgroundTransparency = 0.4
+JoinFrame.BorderSizePixel = 0
+JoinFrame.Visible = false
+JoinFrame.Parent = MainFrame
+
+local JoinStroke = Instance.new("UIStroke")
+JoinStroke.Color = Color3.fromRGB(147, 112, 219)
+JoinStroke.Thickness = 2
+JoinStroke.Parent = JoinFrame
+
+local UICorner_Join = Instance.new("UICorner")
+UICorner_Join.CornerRadius = UDim.new(0, 12)
+UICorner_Join.Parent = JoinFrame
+
+local MapButton = Instance.new("TextButton")
+MapButton.Name = "MapButton"
+MapButton.Size = UDim2.new(0.9, 0, 0, 25)
+MapButton.Position = UDim2.new(0.05, 0, 0.05, 0)
+MapButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+MapButton.BackgroundTransparency = 0.6
+MapButton.Text = "Map: Corrupted Forest"
+MapButton.Font = Enum.Font.Gotham
+MapButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+MapButton.TextSize = 12
+MapButton.Parent = JoinFrame
+
+local UICorner_Map = Instance.new("UICorner")
+UICorner_Map.CornerRadius = UDim.new(0, 8)
+UICorner_Map.Parent = MapButton
+
+local PlayerCountInput = Instance.new("TextBox")
+PlayerCountInput.Name = "PlayerCountInput"
+PlayerCountInput.Size = UDim2.new(0.9, 0, 0, 25)
+PlayerCountInput.Position = UDim2.new(0.05, 0, 0.225, 0)
+PlayerCountInput.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+PlayerCountInput.BackgroundTransparency = 0.6
+PlayerCountInput.Text = ""
+PlayerCountInput.PlaceholderText = "Required Players (default 1)"
+PlayerCountInput.Font = Enum.Font.Gotham
+PlayerCountInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+PlayerCountInput.TextSize = 12
+PlayerCountInput.Parent = JoinFrame
+
+PlayerCountInput.Text = tostring(requiredPlayers)
+
+local UICorner_PlayerCount = Instance.new("UICorner")
+UICorner_PlayerCount.CornerRadius = UDim.new(0, 8)
+UICorner_PlayerCount.Parent = PlayerCountInput
+
+local DifficultyButton = Instance.new("TextButton")
+DifficultyButton.Name = "DifficultyButton"
+DifficultyButton.Size = UDim2.new(0.9, 0, 0, 25)
+DifficultyButton.Position = UDim2.new(0.05, 0, 0.4, 0)
+DifficultyButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+DifficultyButton.BackgroundTransparency = 0.6
+DifficultyButton.Text = "Difficulty: Basic"
+DifficultyButton.Font = Enum.Font.Gotham
+DifficultyButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+DifficultyButton.TextSize = 12
+DifficultyButton.Parent = JoinFrame
+
+local UICorner_Difficulty = Instance.new("UICorner")
+UICorner_Difficulty.CornerRadius = UDim.new(0, 8)
+UICorner_Difficulty.Parent = DifficultyButton
+
+local HPButton = Instance.new("TextButton")
+HPButton.Name = "HPButton"
+HPButton.Size = UDim2.new(0.9, 0, 0, 25)
+HPButton.Position = UDim2.new(0.05, 0, 0.575, 0)
+HPButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+HPButton.BackgroundTransparency = 0.6
+HPButton.Text = "HP: Infinite"
+HPButton.Font = Enum.Font.Gotham
+HPButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+HPButton.TextSize = 12
+HPButton.Parent = JoinFrame
+
+local UICorner_HP = Instance.new("UICorner")
+UICorner_HP.CornerRadius = UDim.new(0, 8)
+UICorner_HP.Parent = HPButton
+
+local StartButton = Instance.new("TextButton")
+StartButton.Name = "StartButton"
+StartButton.Size = UDim2.new(0.9, 0, 0, 25)
+StartButton.Position = UDim2.new(0.05, 0, 0.75, 0)
+StartButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+StartButton.BackgroundTransparency = 0.6
+StartButton.Text = "Start"
+StartButton.Font = Enum.Font.Gotham
+StartButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+StartButton.TextSize = 12
+StartButton.Parent = JoinFrame
+
+local UICorner_Start = Instance.new("UICorner")
+UICorner_Start.CornerRadius = UDim.new(0, 8)
+UICorner_Start.Parent = StartButton
+
+PlayerCountInput.FocusLost:Connect(function(enterPressed)
+    local inputValue = tonumber(PlayerCountInput.Text)
+    if inputValue and inputValue >= 1 then
+        requiredPlayers = inputValue
+        saveSettings()
+    else
+        PlayerCountInput.Text = tostring(requiredPlayers)
+    end
+end)
+
+local SellFrame = Instance.new("Frame")
+SellFrame.Name = "SellFrame"
+SellFrame.Size = UDim2.new(0, 180, 0, 140)
+SellFrame.Position = UDim2.new(1.05, 0, 0, 0)
+SellFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+SellFrame.BackgroundTransparency = 0.4
+SellFrame.BorderSizePixel = 0
+SellFrame.Visible = false
+SellFrame.Parent = MainFrame
+
+local SellStroke = Instance.new("UIStroke")
+SellStroke.Color = Color3.fromRGB(147, 112, 219)
+SellStroke.Thickness = 2
+SellStroke.Parent = SellFrame
+
+local UICorner_Sell = Instance.new("UICorner")
+UICorner_Sell.CornerRadius = UDim.new(0, 12)
+UICorner_Sell.Parent = SellFrame
+
+local TypeFrame = Instance.new("Frame")
+TypeFrame.Name = "TypeFrame"
+TypeFrame.BackgroundTransparency = 1
+TypeFrame.Position = UDim2.new(0, 5, 0, 5)
+TypeFrame.Size = UDim2.new(1, -10, 0, 60)
+TypeFrame.Parent = SellFrame
+
+local RarityFrame = Instance.new("Frame")
+RarityFrame.Name = "RarityFrame"
+RarityFrame.BackgroundTransparency = 1
+RarityFrame.Position = UDim2.new(0, 5, 0, 70)
+RarityFrame.Size = UDim2.new(1, -10, 0, 30)
+RarityFrame.Parent = SellFrame
+
+loadSettings()
+
+local DistanceFrame = Instance.new("Frame")
+DistanceFrame.Name = "DistanceFrame"
+DistanceFrame.Size = UDim2.new(0.9, 0, 0, 40)
+DistanceFrame.Position = UDim2.new(0.05, 0, 0.65, 0)
+DistanceFrame.BackgroundTransparency = 1
+DistanceFrame.Parent = MainFrame
+
+local DistanceLabel = Instance.new("TextLabel")
+DistanceLabel.Name = "DistanceLabel"
+DistanceLabel.Size = UDim2.new(1, 0, 0, 20)
+DistanceLabel.Position = UDim2.new(0, 0, 0, 0)
+DistanceLabel.BackgroundTransparency = 1
+DistanceLabel.Text = "Attack Distance: " .. mobDistance
+DistanceLabel.Font = Enum.Font.Gotham
+DistanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+DistanceLabel.TextSize = 12
+DistanceLabel.Parent = DistanceFrame
+
+local SliderFrame = Instance.new("Frame")
+SliderFrame.Name = "SliderFrame"
+SliderFrame.Size = UDim2.new(1, 0, 0, 4)
+SliderFrame.Position = UDim2.new(0, 0, 0.6, 0)
+SliderFrame.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+SliderFrame.BackgroundTransparency = 0.6
+SliderFrame.Parent = DistanceFrame
+
+local UICorner_Slider = Instance.new("UICorner")
+UICorner_Slider.CornerRadius = UDim.new(0, 2)
+UICorner_Slider.Parent = SliderFrame
+
+local SliderButton = Instance.new("TextButton")
+SliderButton.Name = "SliderButton"
+SliderButton.Size = UDim2.new(0, 12, 0, 12)
+SliderButton.Position = UDim2.new((mobDistance - 5) / 15, -6, 0.5, -6)
+SliderButton.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+SliderButton.Text = ""
+SliderButton.Parent = SliderFrame
+
+local UICorner_SliderButton = Instance.new("UICorner")
+UICorner_SliderButton.CornerRadius = UDim.new(1, 0)
+UICorner_SliderButton.Parent = SliderButton
+
+SpellDelayButton.MouseButton1Click:Connect(function()
+   isSpellDelay = not isSpellDelay
+   SpellDelayButton.BackgroundColor3 = isSpellDelay and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+   saveSettings()
+end)
+
+local function updateSlider(pos)
+    local sliderPos = pos - SliderFrame.AbsolutePosition.X
+    local sliderSize = SliderFrame.AbsoluteSize.X
+    local percentage = math.clamp(sliderPos / sliderSize, 0, 1)
+    mobDistance = math.floor(percentage * 15 + 5)
+    DistanceLabel.Text = "Mob Distance: " .. mobDistance
+    SliderButton.Position = UDim2.new(percentage, -6, 0.5, -6)
+    saveSettings()
+end
+
+local isDragging = false
+
+SliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = true
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        isDragging = false
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if isDragging and 
+       (input.UserInputType == Enum.UserInputType.MouseMovement or 
+        input.UserInputType == Enum.UserInputType.Touch) then
+        updateSlider(input.Position.X)
+    end
+end)
+
+SliderFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        updateSlider(input.Position.X)
+        isDragging = true
+    end
+end)
+
+local SpeedFrame = Instance.new("Frame")
+SpeedFrame.Name = "SpeedFrame"
+SpeedFrame.Size = UDim2.new(0.9, 0, 0, 40)
+SpeedFrame.Position = UDim2.new(0.05, 0, 0.77, 0)
+SpeedFrame.BackgroundTransparency = 1
+SpeedFrame.Parent = MainFrame
+
+local SpeedLabel = Instance.new("TextLabel")
+SpeedLabel.Name = "SpeedLabel"
+SpeedLabel.Size = UDim2.new(1, 0, 0, 20)
+SpeedLabel.Position = UDim2.new(0, 0, 0, 0)
+SpeedLabel.BackgroundTransparency = 1
+SpeedLabel.Text = "Move Speed: " .. moveSpeed
+SpeedLabel.Font = Enum.Font.Gotham
+SpeedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+SpeedLabel.TextSize = 12
+SpeedLabel.Parent = SpeedFrame
+
+local SpeedSliderFrame = Instance.new("Frame")
+SpeedSliderFrame.Name = "SpeedSliderFrame"
+SpeedSliderFrame.Size = UDim2.new(1, 0, 0, 4)
+SpeedSliderFrame.Position = UDim2.new(0, 0, 0.6, 0)
+SpeedSliderFrame.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+SpeedSliderFrame.BackgroundTransparency = 0.6
+SpeedSliderFrame.Parent = SpeedFrame
+
+local UICorner_SpeedSlider = Instance.new("UICorner")
+UICorner_SpeedSlider.CornerRadius = UDim.new(0, 2)
+UICorner_SpeedSlider.Parent = SpeedSliderFrame
+
+local SpeedSliderButton = Instance.new("TextButton")
+SpeedSliderButton.Name = "SpeedSliderButton"
+SpeedSliderButton.Size = UDim2.new(0, 12, 0, 12)
+SpeedSliderButton.Position = UDim2.new((moveSpeed - 10) / 40, -6, 0.5, -6)
+SpeedSliderButton.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+SpeedSliderButton.Text = ""
+SpeedSliderButton.Parent = SpeedSliderFrame
+
+local UICorner_SpeedSliderButton = Instance.new("UICorner")
+UICorner_SpeedSliderButton.CornerRadius = UDim.new(1, 0)
+UICorner_SpeedSliderButton.Parent = SpeedSliderButton
+
+local isSpeedDragging = false
+
+local function updateSpeedSlider(pos)
+    local sliderPos = pos - SpeedSliderFrame.AbsolutePosition.X
+    local sliderSize = SpeedSliderFrame.AbsoluteSize.X
+    local percentage = math.clamp(sliderPos / sliderSize, 0, 1)
+    moveSpeed = math.floor(percentage * 40 + 10)
+    SpeedLabel.Text = "Move Speed: " .. moveSpeed
+    SpeedSliderButton.Position = UDim2.new((moveSpeed - 10) / 40, -6, 0.5, -6)
+    saveSettings()
+end
+
+SpeedSliderButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        isSpeedDragging = true
+    end
+end)
+
+game:GetService("UserInputService").InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        isSpeedDragging = false
+    end
+end)
+
+game:GetService("UserInputService").InputChanged:Connect(function(input)
+    if isSpeedDragging and 
+       (input.UserInputType == Enum.UserInputType.MouseMovement or 
+        input.UserInputType == Enum.UserInputType.Touch) then
+        updateSpeedSlider(input.Position.X)
+    end
+end)
+
+SpeedSliderFrame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+       input.UserInputType == Enum.UserInputType.Touch then
+        updateSpeedSlider(input.Position.X)
+        isSpeedDragging = true
+    end
+end)
+
+local selectedTypes = {}
+local selectedRarities = {}
+
+local function createTypeButton(name, posX, posY)
+   local button = Instance.new("TextButton")
+   button.Size = UDim2.new(0, 50, 0, 25)
+   button.Position = UDim2.new(0, posX, 0, posY)
+   button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+   button.BackgroundTransparency = 0.6
+   button.Text = name
+   button.TextSize = 9
+   button.Font = Enum.Font.Gotham
+   button.TextColor3 = Color3.fromRGB(255, 255, 255)
+   button.Parent = TypeFrame
+
+   local UICorner = Instance.new("UICorner")
+   UICorner.CornerRadius = UDim.new(0, 8)
+   UICorner.Parent = button
+   
+   button.MouseButton1Click:Connect(function()
+       if selectedTypes[name] then
+           selectedTypes[name] = nil
+           savedSelectedTypes[name] = nil
+           button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+       else
+           selectedTypes[name] = true
+           savedSelectedTypes[name] = true
+           button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+       end
+       saveSettings()
+   end)
+   
+   if savedSelectedTypes[name] then
+       selectedTypes[name] = true
+       button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+   end
+   
+   return button
+end
+
+local function createRarityButton(name, rarity, posX)
+   local button = Instance.new("TextButton")
+   button.Size = UDim2.new(0, 20, 0, 25)
+   button.Position = UDim2.new(0, posX, 0, 0)
+   button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+   button.BackgroundTransparency = 0.6
+   button.Text = string.sub(name, 1, 1)
+   button.TextSize = 8
+   button.Font = Enum.Font.Gotham
+   button.TextColor3 = Color3.fromRGB(255, 255, 255)
+   button.Parent = RarityFrame
+
+   local UICorner = Instance.new("UICorner")
+   UICorner.CornerRadius = UDim.new(0, 8)
+   UICorner.Parent = button
+   
+   button.MouseButton1Click:Connect(function()
+       if selectedRarities[rarity] then
+           selectedRarities[rarity] = nil
+           savedSelectedRarities[rarity] = nil
+           button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+       else
+           selectedRarities[rarity] = true
+           savedSelectedRarities[rarity] = true
+           button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+       end
+       saveSettings()
+   end)
+   
+   if savedSelectedRarities[rarity] then
+       selectedRarities[rarity] = true
+       button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+   end
+   
+   return button
+end
+
+createTypeButton("Weapon", 5, 0)
+createTypeButton("Leggings", 60, 0)
+createTypeButton("Armor", 115, 0)
+createTypeButton("Helmet", 5, 30)
+createTypeButton("Spell", 60, 30)
+createTypeButton("Emblem", 115, 30)
+
+createRarityButton("Common", 1, 5)
+createRarityButton("Uncommon", 2, 30)
+createRarityButton("Rare", 3, 55)
+createRarityButton("Epic", 4, 80)
+createRarityButton("Legendary", 5, 105)
+createRarityButton("Mythic", 6, 130)
+createRarityButton("Fabled", 7, 155)
+
+local SellButton = Instance.new("TextButton")
+SellButton.Size = UDim2.new(0.9, 0, 0, 25)
+SellButton.Position = UDim2.new(0.05, 0, 0.8, 0)
+SellButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+SellButton.BackgroundTransparency = 0.6
+SellButton.Text = "SELL"
+SellButton.TextSize = 12
+SellButton.Font = Enum.Font.Gotham
+SellButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+SellButton.Parent = SellFrame
+
+local UICorner_SellButton = Instance.new("UICorner")
+UICorner_SellButton.CornerRadius = UDim.new(0, 8)
+UICorner_SellButton.Parent = SellButton
+
+local function updateButtonStates()
+   for _, button in ipairs(TypeFrame:GetChildren()) do
+       if button:IsA("TextButton") then
+           if savedSelectedTypes[button.Text] then
+               button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+               selectedTypes[button.Text] = true
+           end
+       end
+   end
+   
+   local rarityMap = {
+       ["C"] = 1,  
+       ["U"] = 2, 
+       ["R"] = 3,
+       ["E"] = 4,
+       ["L"] = 5, 
+       ["M"] = 6,
+       ["F"] = 7
+   }
+   
+   for _, button in ipairs(RarityFrame:GetChildren()) do
+       if button:IsA("TextButton") then
+           local rarityNumber = rarityMap[button.Text]
+           if rarityNumber and savedSelectedRarities[rarityNumber] then
+               button.BackgroundColor3 = Color3.fromRGB(160, 80, 255)
+               selectedRarities[rarityNumber] = true
+           end
+       end
+   end
+end
+
+local WebhookFrame = Instance.new("Frame")
+WebhookFrame.Name = "WebhookFrame"
+WebhookFrame.Size = UDim2.new(0, 180, 0, 140)
+WebhookFrame.Position = UDim2.new(1.05, 0, 0, 0)
+WebhookFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+WebhookFrame.BackgroundTransparency = 0.4
+WebhookFrame.BorderSizePixel = 0
+WebhookFrame.Visible = false
+WebhookFrame.Parent = MainFrame
+
+local WebhookStroke = Instance.new("UIStroke")
+WebhookStroke.Color = Color3.fromRGB(147, 112, 219)
+WebhookStroke.Thickness = 2
+WebhookStroke.Parent = WebhookFrame
+
+local UICorner_Webhook = Instance.new("UICorner")
+UICorner_Webhook.CornerRadius = UDim.new(0, 12)
+UICorner_Webhook.Parent = WebhookFrame
+
+local WebhookInput = Instance.new("TextBox")
+WebhookInput.Size = UDim2.new(0.9, 0, 0, 25)
+WebhookInput.Position = UDim2.new(0.05, 0, 0.05, 0)
+WebhookInput.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+WebhookInput.BackgroundTransparency = 0.6
+WebhookInput.Text = ""
+WebhookInput.PlaceholderText = "Enter Webhook URL"
+WebhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+WebhookInput.Parent = WebhookFrame
+
+local UICorner_Input = Instance.new("UICorner")
+UICorner_Input.CornerRadius = UDim.new(0, 8)
+UICorner_Input.Parent = WebhookInput
+
+local PingLegendaryButton = createButton("Ping Legendary", UDim2.new(0.25, 0, 0.25, 0))
+PingLegendaryButton.Size = UDim2.new(0.5, 0, 0, 25)
+PingLegendaryButton.Parent = WebhookFrame
+
+local PingMythicButton = createButton("Ping Mythic", UDim2.new(0.25, 0, 0.45, 0))
+PingMythicButton.Size = UDim2.new(0.5, 0, 0, 25)
+PingMythicButton.Parent = WebhookFrame
+
+local PingFabledButton = createButton("Ping Fabled", UDim2.new(0.25, 0, 0.65, 0))
+PingFabledButton.Size = UDim2.new(0.5, 0, 0, 25)
+PingFabledButton.Parent = WebhookFrame
+
+local StartWebhookButton = createButton("Start Webhook", UDim2.new(0.25, 0, 0.85, 0))
+StartWebhookButton.Size = UDim2.new(0.5, 0, 0, 25)
+StartWebhookButton.Parent = WebhookFrame
+
+local isWebhookEnabled = false
+local pingOnLegendary = false
+local pingOnMythic = false
+local pingOnFabled = false
+
+local function saveWebhookSettings()
+    ensureSaveFolder()
+    local settings = {
+        url = WebhookInput.Text,
+        pingLegendary = pingOnLegendary,
+        pingMythic = pingOnMythic,
+        pingFabled = pingOnFabled,
+        enabled = isWebhookEnabled
+    }
+    writefile("kinayosaving/webhook.json", game:GetService("HttpService"):JSONEncode(settings))
+end
+
+local function formatNumber(num)
+    local suffixes = {"", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"}
+    local suffixIndex = 1
+    while num >= 1000 and suffixIndex < #suffixes do
+        num = num / 1000
+        suffixIndex = suffixIndex + 1
+    end
+    return string.format("%.1f%s", num, suffixes[suffixIndex])
+end
+
+local function getRarityEmoji(rarity)
+    local emojis = {
+        ["common"] = "⚪",
+        ["uncommon"] = "🟢",
+        ["rare"] = "🔵",
+        ["epic"] = "🟣",
+        ["legendary"] = "🟡",
+        ["mythic"] = "🔴",
+        ["fabled"] = "⚫"
+    }
+    return emojis[string.lower(rarity)] or "❓"
+end
+
+local function formatItems(itemData)
+    local formatted = {}
+    for name, count in pairs(itemData) do
+        if count > 1 then
+            table.insert(formatted, name .. " x" .. count)
+        else
+            table.insert(formatted, name)
+        end
+    end
+    return table.concat(formatted, "\n")
+end
+
+local function getPlayerStats()
+    local player = game.Players.LocalPlayer
+    local inventory = workspace.Inventories:WaitForChild(player.Name)
+    
+    local gold = inventory.Gold.Value
+    local gems = inventory.Gems.Value
+    local level = inventory.Level.Value
+    local experience = inventory.Experience.Value
+    local experienceNeeded = inventory.ExperienceNeeded.Value
+    local maxItems = inventory.MaxItems.Value
+    
+    return {
+        gold = formatNumber(gold),
+        gems = formatNumber(gems),
+        level = level,
+        experience = formatNumber(experience),
+        experienceNeeded = formatNumber(experienceNeeded),
+        maxItems = maxItems
+    }
+end
+
+local function getCurrentInventory()
+    local inventory = {
+        items = {},
+        totalCount = 0,
+        itemData = {}
+    }
+    
+    local playerInventory = workspace.Inventories[game.Players.LocalPlayer.Name]
+    
+    for _, item in pairs(playerInventory.Items:GetChildren()) do
+        if item:IsA("StringValue") then
+            local itemData = item.Value:split(",")
+            local itemName = itemData[1]
+            local itemRarity = tonumber(itemData[2])
+            
+            local cleanItemName = itemName:match("%d+_(.+)") or itemName
+            
+            local rarityNames = {
+                [1] = "Common",
+                [2] = "Uncommon",
+                [3] = "Rare",
+                [4] = "Epic",
+                [5] = "Legendary",
+                [6] = "Mythic",
+                [7] = "Fabled"
+            }
+            
+            local fullName = string.format("%s (%s)", cleanItemName, rarityNames[itemRarity] or "Unknown")
+            table.insert(inventory.items, fullName)
+            inventory.totalCount = inventory.totalCount + 1
+            inventory.itemData[fullName] = (inventory.itemData[fullName] or 0) + 1
+        end
+    end
+    return inventory
+end
+
+local function sendWebhook(title, description, fields, shouldPing)
+    if WebhookInput.Text == "" then return end
+    
+    local player = game.Players.LocalPlayer
+    local stats = getPlayerStats()
+    local current = getCurrentInventory()
+    
+    local playerInfo = string.format(
+        "👤 **%s** (%s)\n" ..
+        "💰 Gold: %s\n" ..
+        "💎 Gems: %s\n" ..
+        "📊 Level: %d\n" ..
+        "⭐ Experience: %s / %s\n" ..
+        "📦 Inventory: %d / %d",
+        player.Name,
+        player.DisplayName,
+        stats.gold,
+        stats.gems,
+        stats.level,
+        stats.experience,
+        stats.experienceNeeded,
+        current.totalCount,
+        stats.maxItems
+    )
+    
+    local shouldPingEveryone = false
+    if shouldPing then
+        for _, field in ipairs(fields) do
+            if field.name == "📦 New Items" then
+                local originalValue = field.value
+                if pingOnLegendary and originalValue:find("%(Legendary%)") then
+                    shouldPingEveryone = true
+                end
+                if pingOnMythic and originalValue:find("%(Mythic%)") then
+                    shouldPingEveryone = true
+                end
+                if pingOnFabled and originalValue:find("%(Fabled%)") then
+                    shouldPingEveryone = true
+                end
+            end
+        end
+    end
+    
+    for _, field in ipairs(fields) do
+        if field.name == "📦 New Items" then
+            field.value = field.value:gsub("%((%w+)%)", function(rarity)
+                return string.format("(%s %s)", getRarityEmoji(rarity), rarity)
+            end)
+        end
+    end
+    
+    local embed = {
+        title = "📊 " .. title,
+        description = description .. "\n\n" .. playerInfo,
+        fields = fields,
+        color = 5814783,
+        timestamp = DateTime.now():ToIsoDate(),
+        footer = {
+            text = "Kinayo Scripts"
+        }
+    }
+    
+    local data = {
+        content = shouldPingEveryone and "@everyone" or "",
+        embeds = {embed}
+    }
+    
+    request({
+        Url = WebhookInput.Text,
+        Method = "POST",
+        Headers = {["Content-Type"] = "application/json"},
+        Body = game:GetService("HttpService"):JSONEncode(data)
+    })
+end
+
+local function loadWebhookSettings()
+   if isfile("kinayosaving/webhook.json") then
+       local settings = game:GetService("HttpService"):JSONDecode(readfile("kinayosaving/webhook.json"))
+       WebhookInput.Text = settings.url or ""
+       pingOnLegendary = settings.pingLegendary or false
+       pingOnMythic = settings.pingMythic or false
+       pingOnFabled = settings.pingFabled or false
+       isWebhookEnabled = settings.enabled or false
+       
+       PingLegendaryButton.BackgroundColor3 = pingOnLegendary and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+       PingMythicButton.BackgroundColor3 = pingOnMythic and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+       PingFabledButton.BackgroundColor3 = pingOnFabled and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+       StartWebhookButton.BackgroundColor3 = isWebhookEnabled and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+       
+       if isWebhookEnabled and WebhookInput.Text ~= "" then
+           local current = getCurrentInventory()
+           writefile("kinayosaving/last_inventory.json", game:GetService("HttpService"):JSONEncode(current))
+           sendWebhook("Script Status", "✨ Webhook monitoring started!", {}, false)
+           
+           task.spawn(function()
+               while isWebhookEnabled do
+                   local current = getCurrentInventory()
+                   local saved = game:GetService("HttpService"):JSONDecode(readfile("kinayosaving/last_inventory.json"))
+                   
+                   local newItems = {}
+                   local newItemsCount = 0
+                   local hasRareItems = false
+                   
+                   for itemName, count in pairs(current.itemData) do
+                       local savedCount = saved.itemData[itemName] or 0
+                       if count > savedCount then
+                           newItems[itemName] = count - savedCount
+                           newItemsCount = newItemsCount + (count - savedCount)
+                           if (pingOnLegendary and itemName:find("%(Legendary%)")) or
+                              (pingOnMythic and itemName:find("%(Mythic%)")) or
+                              (pingOnFabled and itemName:find("%(Fabled%)")) then
+                               hasRareItems = true
+                           end
+                       end
+                   end
+                   
+                   if next(newItems) then
+                       local fields = {
+                           {
+                               name = "📦 New Items",
+                               value = formatItems(newItems),
+                               inline = false
+                           },
+                           {
+                               name = "📈 Statistics",
+                               value = string.format("New items: %d\nTotal items: %d", newItemsCount, current.totalCount),
+                               inline = false
+                           }
+                       }
+                       
+                       local description = hasRareItems and "🌟 Rare items have been found!" or "✨ New items have been found!"
+                       sendWebhook("Inventory Update", description, fields, hasRareItems)
+                       writefile("kinayosaving/last_inventory.json", game:GetService("HttpService"):JSONEncode(current))
+                   end
+                   
+                   task.wait(1)
+               end
+           end)
+       end
+   end
+end
+
+WebhookButton.MouseButton1Click:Connect(function()
+    WebhookFrame.Visible = not WebhookFrame.Visible
+    MainFrame:FindFirstChild("SellFrame").Visible = false
+    MainFrame:FindFirstChild("JoinFrame").Visible = false
+    WebhookButton.BackgroundColor3 = WebhookFrame.Visible and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    MainFrame:FindFirstChild("Auto Sell").BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    MainFrame:FindFirstChild("Auto Join").BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+end)
+
+PingLegendaryButton.MouseButton1Click:Connect(function()
+    pingOnLegendary = not pingOnLegendary
+    PingLegendaryButton.BackgroundColor3 = pingOnLegendary and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    saveWebhookSettings()
+end)
+
+PingMythicButton.MouseButton1Click:Connect(function()
+    pingOnMythic = not pingOnMythic
+    PingMythicButton.BackgroundColor3 = pingOnMythic and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    saveWebhookSettings()
+end)
+
+PingFabledButton.MouseButton1Click:Connect(function()
+    pingOnFabled = not pingOnFabled
+    PingFabledButton.BackgroundColor3 = pingOnFabled and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    saveWebhookSettings()
+end)
+
+StartWebhookButton.MouseButton1Click:Connect(function()
+    if WebhookInput.Text ~= "" then
+        isWebhookEnabled = not isWebhookEnabled
+        StartWebhookButton.BackgroundColor3 = isWebhookEnabled and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+        saveWebhookSettings()
+        
+        if isWebhookEnabled then
+            local current = getCurrentInventory()
+            writefile("kinayosaving/last_inventory.json", game:GetService("HttpService"):JSONEncode(current))
+            sendWebhook("Script Status", "✨ Webhook monitoring started!", {}, false)
+            
+            task.spawn(function()
+                while isWebhookEnabled do
+                    local current = getCurrentInventory()
+                    local saved = game:GetService("HttpService"):JSONDecode(readfile("kinayosaving/last_inventory.json"))
+                    
+                    local newItems = {}
+                    local newItemsCount = 0
+                    local hasRareItems = false
+                    
+                    for itemName, count in pairs(current.itemData) do
+                        local savedCount = saved.itemData[itemName] or 0
+                        if count > savedCount then
+                            newItems[itemName] = count - savedCount
+                            newItemsCount = newItemsCount + (count - savedCount)
+                            if (pingOnLegendary and itemName:find("%(Legendary%)")) or
+                               (pingOnMythic and itemName:find("%(Mythic%)")) or
+                               (pingOnFabled and itemName:find("%(Fabled%)")) then
+                                hasRareItems = true
+                            end
+                        end
+                    end
+                    
+                    if next(newItems) then
+                        local fields = {
+                            {
+                                name = "📦 New Items",
+                                value = formatItems(newItems),
+                                inline = false
+                            },
+                            {
+                                name = "📈 Statistics",
+                                value = string.format("New items: %d", newItemsCount),
+                                inline = false
+                            }
+                        }
+                        
+                        local description = hasRareItems and "🌟 Rare items have been found!" or "✨ New items have been found!"
+                        sendWebhook("Inventory Update", description, fields, hasRareItems)
+                        writefile("kinayosaving/last_inventory.json", game:GetService("HttpService"):JSONEncode(current))
+                    end
+                    
+                    task.wait(1)
+                end
+            end)
+        end
+    end
+end)
+
+loadWebhookSettings()
+
+local dragStart = nil
+local startPos = nil
+local guiDragging = false
+
+local function updateDrag(input)
+   if guiDragging then
+       local delta = input.Position - dragStart
+       MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+   end
+end
+
+local function updateMapText()
+   MapButton.Text = "Map: " .. selectedMap
+end
+
+local function updateDifficultyText()
+   local difficulties = {"Basic", "Moderate", "Expert", "Arcane", "Calamity"}
+   DifficultyButton.Text = "Difficulty: " .. difficulties[selectedDifficulty + 1]
+end
+
+local function updateHPText()
+   local hpOptions = {[0] = "Infinite", [3] = "3", [1] = "1"}
+   HPButton.Text = "HP: " .. hpOptions[selectedHP]
+end
+
+local function createDropdown(parent, options, callback)
+   local existingDropdown = parent:FindFirstChild("Dropdown")
+   if existingDropdown then
+       existingDropdown:Destroy()
+   end
+   
+   local dropdown = Instance.new("Frame")
+   dropdown.Name = "Dropdown"
+   dropdown.Size = UDim2.new(0.9, 0, 0, #options * 25)
+   dropdown.Position = UDim2.new(0.05, 0, 1.1, 0)
+   dropdown.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+   dropdown.BackgroundTransparency = 0.2
+   dropdown.Visible = false
+   dropdown.ZIndex = 10
+   dropdown.Parent = parent
+   
+   local UICorner_Dropdown = Instance.new("UICorner")
+   UICorner_Dropdown.CornerRadius = UDim.new(0, 8)
+   UICorner_Dropdown.Parent = dropdown
+   
+   for i, option in ipairs(options) do
+       local button = Instance.new("TextButton")
+       button.Size = UDim2.new(1, 0, 0, 25)
+       button.Position = UDim2.new(0, 0, 0, (i-1) * 25)
+       button.BackgroundTransparency = 0.6
+       button.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+       button.Text = option
+       button.Font = Enum.Font.Gotham
+       button.TextColor3 = Color3.fromRGB(255, 255, 255)
+       button.TextSize = 12
+       button.ZIndex = 10
+       button.Parent = dropdown
+       
+       local UICorner_Option = Instance.new("UICorner")
+       UICorner_Option.CornerRadius = UDim.new(0, 8)
+       UICorner_Option.Parent = button
+       
+       button.MouseButton1Click:Connect(function()
+           callback(i-1, option)
+           dropdown.Visible = false
+       end)
+   end
+   
+   return dropdown
+end
+
+updateMapText()
+updateDifficultyText()
+updateHPText()
+updateButtonStates()
+updateRenderState()
+
+if isStartPressed then
+   task.spawn(function()
+       local args = {
+           [1] = selectedMap,
+           [2] = selectedDifficulty,
+           [3] = selectedHP,
+           [4] = 0
+       }
+       game:GetService("ReplicatedStorage").PartyCreate:FireServer(unpack(args))
+       task.wait(1)
+       game:GetService("ReplicatedStorage").PartyStart:FireServer()
+   end)
+end
+
+MainFrame.InputBegan:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+       guiDragging = true
+       dragStart = input.Position
+       startPos = MainFrame.Position
+   end
+end)
+
+MainFrame.InputEnded:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+       guiDragging = false
+   end
+end)
+
+MainFrame.InputChanged:Connect(function(input)
+   if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+       updateDrag(input)
+   end
+end)
+
+ToggleButton.MouseButton1Click:Connect(function()
+   MainFrame.Visible = not MainFrame.Visible
+end)
+
+DiscordButton.MouseButton1Click:Connect(function()
+   setclipboard("https://discord.gg/SdWZ9srXJe")
+end)
+
+AutoJoinButton.MouseButton1Click:Connect(function()
+    JoinFrame.Visible = not JoinFrame.Visible
+    SellFrame.Visible = false
+    WebhookFrame.Visible = false
+    AutoJoinButton.BackgroundColor3 = JoinFrame.Visible and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    AutoSellButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    WebhookButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+end)
+
+AutoSellButton.MouseButton1Click:Connect(function()
+    SellFrame.Visible = not SellFrame.Visible
+    JoinFrame.Visible = false
+    WebhookFrame.Visible = false
+    AutoSellButton.BackgroundColor3 = SellFrame.Visible and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+    AutoJoinButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+    WebhookButton.BackgroundColor3 = Color3.fromRGB(100, 50, 200)
+end)
+
+MapButton.MouseButton1Click:Connect(function()
+   local mapDropdown = createDropdown(MapButton, {"Corrupted Forest"}, function(_, option)
+       selectedMap = option
+       updateMapText()
+       saveSettings()
+   end)
+   mapDropdown.Visible = not mapDropdown.Visible
+end)
+
+SellButton.MouseButton1Click:Connect(function()
+   isSellPressed = not isSellPressed
+   SellButton.BackgroundColor3 = isSellPressed and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   saveSettings()
+end)
+
+RenderButton.MouseButton1Click:Connect(function()
+   isRenderDisabled = not isRenderDisabled
+   RenderButton.BackgroundColor3 = isRenderDisabled and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   updateRenderState()
+   saveSettings()
+end)
+
+LootResetButton.MouseButton1Click:Connect(function()
+   isLootReset = not isLootReset
+   LootResetButton.BackgroundColor3 = isLootReset and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   saveSettings()
+end)
+
+StartButton.MouseButton1Click:Connect(function()
+   isStartPressed = not isStartPressed
+   StartButton.BackgroundColor3 = isStartPressed and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+   
+   if isStartPressed then
+       task.spawn(function()
+           local args = {
+               [1] = selectedMap,
+               [2] = selectedDifficulty,
+               [3] = selectedHP,
+               [4] = 0
+           }
+           game:GetService("ReplicatedStorage").PartyCreate:FireServer(unpack(args))
+           task.wait(1)
+           
+           local function countPartyPlayers()
+               local count = 0
+               local playerName = game.Players.LocalPlayer.Name
+               local partyFolder = workspace:FindFirstChild("Parties")
+               local playerParty = partyFolder and partyFolder:FindFirstChild(playerName)
+               local partyPlayers = playerParty and playerParty:FindFirstChild("Players")
+               
+               if partyPlayers then
+                   for _, player in pairs(partyPlayers:GetChildren()) do
+                       if player:IsA("BoolValue") then
+                           count = count + 1
+                       end
+                   end
+               end
+               return count
+           end
+           
+           while isStartPressed do
+               local currentPlayers = countPartyPlayers()
+               
+               if currentPlayers >= requiredPlayers then
+                   game:GetService("ReplicatedStorage").PartyStart:FireServer()
+                   break
+               end
+               
+               task.wait(1)
+           end
+       end)
+   end
+   saveSettings()
+end)
+
+DifficultyButton.MouseButton1Click:Connect(function()
+   local difficultyDropdown = createDropdown(DifficultyButton, {"Basic", "Moderate", "Expert", "Arcane", "Calamity"}, function(value)
+       selectedDifficulty = value
+       updateDifficultyText()
+       saveSettings()
+   end)
+   difficultyDropdown.Visible = not difficultyDropdown.Visible
+end)
+
+HPButton.MouseButton1Click:Connect(function()
+   local hpDropdown = createDropdown(HPButton, {"Infinite", "3", "1"}, function(value, option)
+       if option == "Infinite" then
+           selectedHP = 0
+       else
+           selectedHP = tonumber(option)
+       end
+       updateHPText()
+       saveSettings()
+   end)
+   hpDropdown.Visible = not hpDropdown.Visible
+end)
+
+AutoAttackButton.MouseButton1Click:Connect(function()
+   isAutoAttack = not isAutoAttack
+   AutoAttackButton.BackgroundColor3 = isAutoAttack and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   if isAutoAttack and isFarming then
+       task.spawn(autoAttack)
+   end
+   saveSettings()
+end)
+
+AutoSpellButton.MouseButton1Click:Connect(function()
+   isAutoSpell = not isAutoSpell
+   AutoSpellButton.BackgroundColor3 = isAutoSpell and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   if isAutoSpell and isFarming then
+       task.spawn(castSpells)
+   end
+   saveSettings()
+end)
+
+FarmButton.MouseButton1Click:Connect(function()
+   isFarming = not isFarming
+   FarmButton.BackgroundColor3 = isFarming and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+   if isFarming then
+       startFarming()
+   else
+       updateRenderState()
+   end
+   saveSettings()
+end)
+
+AutoAttackButton.BackgroundColor3 = isAutoAttack and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+AutoSpellButton.BackgroundColor3 = isAutoSpell and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+FarmButton.BackgroundColor3 = isFarming and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+RenderButton.BackgroundColor3 = isRenderDisabled and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+LootResetButton.BackgroundColor3 = isLootReset and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+StartButton.BackgroundColor3 = isStartPressed and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+SellButton.BackgroundColor3 = isSellPressed and Color3.fromRGB(160, 80, 255)or Color3.fromRGB(100, 50, 200)
+SpellDelayButton.BackgroundColor3 = isSpellDelay and Color3.fromRGB(160, 80, 255) or Color3.fromRGB(100, 50, 200)
+
+local BaseGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("BaseGui")
+local Timer = BaseGui:FindFirstChild("Timer")
+
+if Timer then
+   Timer.Retry:GetPropertyChangedSignal("Visible"):Connect(function()
+       if Timer.Retry.Visible and isFarming then
+           local args = {
+               [1] = true
+           }
+           game:GetService("ReplicatedStorage").Retry:FireServer(unpack(args))
+       end
+   end)
+end
+
+local InventoryGui = game:GetService("Players").LocalPlayer.PlayerGui:WaitForChild("InventoryGui")
+local ItemDrops = InventoryGui:WaitForChild("Item Drops")
+
+ItemDrops:GetPropertyChangedSignal("Visible"):Connect(function()
+   if ItemDrops.Visible and isLootReset then
+       game.Players.LocalPlayer.Character:BreakJoints()
+   end
+end)
+
+game.Players.LocalPlayer.CharacterAdded:Connect(function()
+   if isFarming then
+       startFarming()
+   end
+end)
+
+if isFarming then
+   task.spawn(startFarming)
+end
+
+task.spawn(function()
+   while true do
+       task.wait(0.2)
+       local player = game.Players.LocalPlayer
+       local character = player.Character
+       if character then
+           local head = character:FindFirstChild("Head")
+           if head then
+               local statsBar = head:FindFirstChild("StatsBar")
+               if statsBar then
+                   statsBar:Destroy()
+               end
+           end
+       end
+       
+       local baseGui = player.PlayerGui:FindFirstChild("BaseGui")
+       if baseGui then
+           local playerStats = baseGui:FindFirstChild("PlayerStats")
+           if playerStats then
+               local username = playerStats:FindFirstChild("Username")
+               if username then
+                   username.Text = "discord.gg/SdWZ9srXJe"
+               end
+               
+               local level = playerStats:FindFirstChild("Level")
+               if level then
+                   local inner = level:FindFirstChild("Inner")
+                   if inner then
+                       inner.Level.Text = "K"
+                   end
+               end
+           end
+       end
+   end
+end)
+
+task.spawn(function()
+ while wait(5) do
+     if isSellPressed and (next(selectedTypes) ~= nil and next(selectedRarities) ~= nil) then
+         local inventory = workspace.Inventories[game.Players.LocalPlayer.Name].Items
+         local equippedItems = getEquippedAndPinnedItems()
+         
+         for _, item in pairs(inventory:GetChildren()) do
+             if item:IsA("StringValue") then
+                 local itemData = item.Value:split(",")
+                 local itemName = itemData[1]
+                 local itemRarity = tonumber(itemData[2])
+                 
+                 if not equippedItems[item.Name] and selectedRarities[itemRarity] then
+                     local itemInfo = workspace.Items:FindFirstChild(itemName)
+                     if itemInfo and itemInfo:FindFirstChild("Info") then
+                         local itemType = itemInfo.Info.Value:split(",")[1]
+                         if selectedTypes[itemType] then
+                             local args = {
+                                 [1] = {
+                                     [1] = item.Name
+                                 }
+                             }
+                             game:GetService("ReplicatedStorage").SellItem:FireServer(unpack(args))
+                             wait(0.1)
+                         end
+                     end
+                 end
+             end
+         end
+     end
+ end
+end)
+
+while true do
+repeat wait() until game.CoreGui:FindFirstChild('RobloxPromptGui')
+local lp,po,ts = game:GetService('Players').LocalPlayer,game.CoreGui.RobloxPromptGui.promptOverlay,game:GetService('TeleportService')
+po.ChildAdded:connect(function(a)
+    if a.Name == 'ErrorPrompt' then
+        repeat
+            if isAutoRealm then
+                ts:Teleport(120867763832462)
+            else
+                ts:Teleport(125503319883299)
+            end
+            wait(2)
+        until false
+    end
+end)
+end
+
+end
+
+loadMainScript()
